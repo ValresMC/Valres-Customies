@@ -66,67 +66,66 @@ final class CustomiesItemFactory {
 	 * item components if present.
 	 * @phpstan-param class-string $className
 	 */
-	public function registerItem(string $className, string $identifier, string $name): void {
-		if($className !== Item::class) {
-			Utils::testValidInstance($className, Item::class);
-		}
+    public function registerItem(Item $item, string $identifier): void {
+        $itemId = ItemTypeIds::newId();
+        $this->registerCustomItemMapping($identifier, $itemId);
 
-		$itemId = ItemTypeIds::newId();
-		$item = new $className(new ItemIdentifier($itemId), $name);
-		$this->registerCustomItemMapping($identifier, $itemId);
+        GlobalItemDataHandlers::getDeserializer()->map($identifier, fn() => clone $item);
+        GlobalItemDataHandlers::getSerializer()->map($item, fn() => new SavedItemData($identifier));
 
-		GlobalItemDataHandlers::getDeserializer()->map($identifier, fn() => clone $item);
-		GlobalItemDataHandlers::getSerializer()->map($item, fn() => new SavedItemData($identifier));
+        StringToItemParser::getInstance()->register($identifier, fn() => clone $item);
+        StringToItemParser::getInstance()->override(str_replace("minecraft:", "", $identifier), fn() => clone $item);
 
-		StringToItemParser::getInstance()->register($identifier, fn() => clone $item);
+        if(($componentBased = $item instanceof ItemComponents)) {
+            $this->itemComponentEntries[$identifier] = new ItemComponentPacketEntry($identifier,
+                new CacheableNbt($item->getComponents()
+                    ->setInt("id", $itemId)
+                    ->setString("name", $identifier)
+                )
+            );
+        }
 
-		if(($componentBased = $item instanceof ItemComponents)) {
-			$this->itemComponentEntries[$identifier] = new ItemComponentPacketEntry($identifier,
-				new CacheableNbt($item->getComponents()
-					->setInt("id", $itemId)
-					->setString("name", $identifier)
-				)
-			);
-		}
-
-		$this->itemTableEntries[$identifier] = new ItemTypeEntry($identifier, $itemId, $componentBased);
-		CreativeInventory::getInstance()->add($item);
-	}
+        $this->itemTableEntries[$identifier] = new ItemTypeEntry($identifier, $itemId, $componentBased);
+        CreativeInventory::getInstance()->add($item);
+    }
 
 	/**
 	 * Registers a custom item ID to the required mappings in the global ItemTypeDictionary instance.
 	 */
-	private function registerCustomItemMapping(string $identifier, int $itemId): void {
-		$dictionary = TypeConverter::getInstance()->getItemTypeDictionary();
-		$reflection = new ReflectionClass($dictionary);
+    private function registerCustomItemMapping(string $identifier, int $itemId): void {
+        $dictionary = TypeConverter::getInstance()->getItemTypeDictionary();
+        $reflection = new ReflectionClass($dictionary);
 
-		$intToString = $reflection->getProperty("intToStringIdMap");
-		/** @var int[] $value */
-		$value = $intToString->getValue($dictionary);
-		$intToString->setValue($dictionary, $value + [$itemId => $identifier]);
+        $intToString = $reflection->getProperty("intToStringIdMap");
+        /** @var int[] $value */
+        $value = $intToString->getValue($dictionary);
+        $intToString->setValue($dictionary, $value + [$itemId => $identifier]);
 
-		$stringToInt = $reflection->getProperty("stringToIntMap");
-		/** @var int[] $value */
-		$value = $stringToInt->getValue($dictionary);
-		$stringToInt->setValue($dictionary, $value + [$identifier => $itemId]);
-	}
+        $stringToInt = $reflection->getProperty("stringToIntMap");
+        /** @var int[] $value */
+        $value = $stringToInt->getValue($dictionary);
+        $stringToInt->setValue($dictionary, $value + [$identifier => $itemId]);
+    }
 
 	/**
 	 * Registers the required mappings for the block to become an item that can be placed etc. It is assigned an ID that
 	 * correlates to its block ID.
 	 */
-	public function registerBlockItem(string $identifier, Block $block): void {
-		$itemId = $block->getIdInfo()->getBlockTypeId();
-		$this->registerCustomItemMapping($identifier, $itemId);
-		StringToItemParser::getInstance()->registerBlock($identifier, fn() => clone $block);
-		$this->itemTableEntries[] = new ItemTypeEntry($identifier, $itemId, false);
+    public function registerBlockItem(string $identifier, Block $block): void {
+        $itemId = $block->getIdInfo()->getBlockTypeId();
+        $this->registerCustomItemMapping($identifier, $itemId);
+        StringToItemParser::getInstance()->registerBlock($identifier, fn() => clone $block);
+        $this->itemTableEntries[] = new ItemTypeEntry($identifier, $itemId, false);
 
-		$blockItemIdMap = BlockItemIdMap::getInstance();
-		$reflection = new ReflectionClass($blockItemIdMap);
+        StringToItemParser::getInstance()->registerBlock($identifier, fn() => clone $block);
+        StringToItemParser::getInstance()->override(str_replace("minecraft:", "", $identifier), fn() => clone $block->asItem());
 
-		$itemToBlockId = $reflection->getProperty("itemToBlockId");
-		/** @var string[] $value */
-		$value = $itemToBlockId->getValue($blockItemIdMap);
-		$itemToBlockId->setValue($blockItemIdMap, $value + [$identifier => $identifier]);
-	}
+        $blockItemIdMap = BlockItemIdMap::getInstance();
+        $reflection = new ReflectionClass($blockItemIdMap);
+
+        $itemToBlockId = $reflection->getProperty("itemToBlockId");
+        /** @var string[] $value */
+        $value = $itemToBlockId->getValue($blockItemIdMap);
+        $itemToBlockId->setValue($blockItemIdMap, $value + [$identifier => $identifier]);
+    }
 }
